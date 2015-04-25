@@ -1,0 +1,168 @@
+---
+title: "Predict Human Activity Recognition"
+author: "Paulo Sá"
+date: "Friday, April 17, 2015"
+output: html_document
+---
+
+
+##Executive Summary  
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants in order to predict the manner in which they did the exercise.
+The prediction is reflected on "classe" variable in training dataset, and the other variables are possible predictors.
+
+The training data will be split into 75% for training and 25% for validation. Four models were evaluated, Linear Discriminant Analysis, Gradient Boosting Machine, Random Forest and C5.0 decision tree. The model built using the Random Forest algorithms gave the highest accuracy of 95%. This model was chosen as the final model to predict on the original testing data set.
+
+With a great accuracy, we expect very few or none of the test samples to be misclassified. Using the model to predict on the original testing data set, it produced twenty predictions but one was misclassified.
+
+##Load, clean and explore data
+
+```{r echo=TRUE, message=FALSE, warning=FALSE,cache=TRUE}
+# check if a data folder exists; if not then create one
+if (!file.exists("data")) {dir.create("data")}
+
+#Getting the train and test files URL:
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+download.file(trainUrl, paste("./data/pml-training.csv", "/pml-training.csv", sep=""), method="curl")
+download.file(testUrl, paste("./data/pml-testing.csv", "/pml-testing.csv", sep=""), method="curl")
+
+data.train <- read.csv("./data/pml-training.csv", header=TRUE, sep=",", na.strings=c("", "NA", "NULL", "#DIV/0!"))
+data.test <- read.csv("./data/pml-testing.csv", header=TRUE, sep=",", na.strings=c("", "NA", "NULL","#DIV/0!"))
+```
+
+Training dataset has `r dim(data.train)[1]` observations and `r dim(data.train)[2]` variables, however we have interest only in classe variable that is our outcome and accelerometer variables that are our predictors.
+So, firstly we loaded training data was split 75% to a training set and 25% to a validation set.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE,cache=TRUE}
+library(caret)
+#Set seed for research reproducibility
+set.seed(201505)
+
+# split the training data into training and validation
+train.index <- createDataPartition(y = data.train$classe, p = 0.75, list = FALSE)
+train <- data.train [train.index, ]
+validation <- data.train [-train.index, ]
+
+# get only useful data that enables the prediction by accelometers
+train.outcome <- train[, names(train) == "classe"]
+train.predictors <- train[, grepl("^accel", names(train))]
+validation.outcome <- validation[, names(validation) == "classe"]
+validation.predictors <- validation[, grepl("^accel", names(validation))]
+
+test.predictors <- data.test[, grepl("^accel", names(data.test))]
+```
+
+```{r echo=FALSE}
+rm(data.test) 
+rm(data.train)
+rm(train) 
+rm(train.index) 
+rm(validation)
+```
+
+After this process was obtained tidy datasets with a reduce to `r dim(train.predictors)[2]` predictors on training set.
+
+##Select a prediction model
+
+In this point several models was used to find the most accurate regression model. In train control was used 5-fold cross validation to the purpose to reduce the variance in our results, and to validate that we aren't overfitting our model to the training data.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE,cache=TRUE}
+train.control <- trainControl(method = "cv",number = 5)
+```
+
+Next, four models was considered to predict the outcome variable.
+
+###Linear Discriminant Analysis Model (LDA)
+
+```{r echo=TRUE, message=FALSE, warning=FALSE,cache=TRUE}
+lda.model <- train(train.outcome ~ ., data=train.predictors, method="lda",trControl=train.control, verbose=FALSE)
+lda.predictions <- predict(lda.model, validation.predictors)
+lda.CM <- confusionMatrix(lda.predictions, validation.outcome)
+lda.CM$overall
+```
+
+###Gradient Boosting Machine Model (GBM)
+
+```{r echo=TRUE, message=FALSE, warning=FALSE,cache=TRUE}
+gbm.model <- train(train.outcome ~ ., data=train.predictors, method="gbm", trControl=train.control, verbose=FALSE)
+gbm.predictions <- predict(gbm.model, validation.predictors)
+gbm.CM <- confusionMatrix(gbm.predictions, validation.outcome)
+gbm.CM$overall
+```
+###Random Forest Model (RF)
+```{r echo=TRUE, message=FALSE, warning=FALSE,cache=TRUE}
+rf.model <- train(train.outcome ~ ., data=train.predictors, method="rf", ntree=300, trControl=train.control,importance = TRUE, verbose=FALSE)
+rf.predictions <- predict(rf.model, validation.predictors)
+rf.CM <- confusionMatrix(rf.predictions, validation.outcome)
+rf.CM$overall
+```
+
+###C5.0 Decision Trees (C50)
+
+```{r echo=TRUE, message=FALSE, warning=FALSE,cache=TRUE}
+library(C50)
+c50.model<-C5.0(train.predictors, train.outcome, trials = 100)
+c50.predictions<-predict(c50.model, validation.predictors)
+c50.CM <- confusionMatrix(c50.predictions, validation.outcome)
+c50.CM$overall
+```
+
+###Models Comparison
+
+After apply each model to the validation set we stored all confusion matrix.
+The main purpose was to plot all the accuracy value in order to select the best regression model.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(ggplot2)
+
+#create a data frame with four models accuracy
+model.comparison.labels <- c('LDA', 'GBM', 'RF','C5.0')
+model.comparison.values <- round(c(lda.CM$overall['Accuracy'], gbm.CM$overall['Accuracy'], rf.CM$overall['Accuracy'], c50.CM$overall['Accuracy'])*100,1)
+model.comparison = data.frame(model = model.comparison.labels, accuracy= model.comparison.values)
+
+#Plot four models comparison
+ggplot(data=model.comparison, aes(x=model, y=accuracy, fill=model)) + geom_bar(stat="identity") + xlab("Model") + ylab("Accuracy %") + ggtitle("Model Accuracy Comparison")+ geom_text(aes(label = accuracy))
+```
+
+With the previous plot, we can conclude that the best regression model is RandomForest.
+So next, was evaluated the importance of each predictor to the model.
+
+```{r echo=TRUE,message=TRUE,warning=FALSE}
+library(randomForest)
+varImpPlot(rf.model$finalModel, sort=TRUE,main="Predictors importance on RF model")
+```
+
+The first plot "MeanDecreaseAccuracy" is computed from permuting OOB data, so for each tree, the prediction error on the out-of-bag portion of the data.
+
+Second plot "MeanDecreaseGini" is the total decrease in node impurities from splitting on the variable, averaged over all trees
+
+##Predict outcome in test set
+
+The final step was to predict outcome, applying the selected regression model to 20 test cases available in the test set.
+
+```{r echo=TRUE,message=TRUE,warning=FALSE}
+#apply select regression model to test set
+answers <- predict(rf.model, test.predictors )
+
+pml_write_files = function(x)
+{
+  n = length(x)
+  for (i in 1:n)
+  {
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+
+answers
+```
+
+
+##Conclusions
+
+It was very interesting to analyze the different models of linear regression. The biggest challenge was hardware limitations, because were obtained some problems of memory limit and CPU overload.
+So, it wasn't possible produce random forest model without ntree limit. On resampling method, the usage of repetition cross validation caused the same performance problems, so we didn't used this method.
